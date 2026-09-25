@@ -1,0 +1,25 @@
+# Repo-wide tool config only. Snippets carry their own dependencies inline (PEP 723),
+# so there is deliberately no [project] table and no lockfile.
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF", "S", "PTH", "LOG", "G"]
+ignore = [
+    "S101",  # asserts are fine in tests and demos
+    "S603",  # subprocess with argument lists is how the verifier works
+]
+
+[tool.ruff.lint.isort]
+# Snippet tests import the snippet as a sibling module.
+known-local-folder = ["main"]
+
+[tool.ruff.lint.per-file-ignores]
+"tools/*" = ["S404"]
+
+[tool.mypy]
+strict = true
+python_version = "3.12"
+warn_unreachable = true

@@ -1,0 +1,165 @@
+name: verify
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Weekly rot check, Monday 05:17 UTC (off the hour to avoid the cron stampede).
+    - cron: "17 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UV_NO_PROGRESS: "1"
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    outputs:
+      snippets: ${{ steps.pick.outputs.snippets }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v8.1.0
+      - id: pick
+        name: Choose snippets to verify
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          set -euo pipefail
+          all=$(uv run tools/verify.py --list-json)
+
+          # Scheduled and manual runs check everything; that's the point of them.
+          if [[ "$EVENT" == "schedule" || "$EVENT" == "workflow_dispatch" || -z "${BASE_SHA//0/}" ]]; then
+            echo "snippets=$all" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+
+          changed=$(git diff --name-only "$BASE_SHA" HEAD)
+          # Changes to shared tooling or config can break any snippet.
+          if grep -qE '^(tools/|pyproject\.toml|\.github/)' <<<"$changed"; then
+            echo "snippets=$all" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+
+          # "|| true": no snippet changes (e.g. a README typo at the root) is not an error.
+          picked=$({ grep -oP '^snippets/\K[^/_.][^/]*(?=/)' <<<"$changed" || true; } | sort -u \
+            | jq -R -s -c --argjson all "$all" 'split("\n") | map(select(length > 0)) | map(select(. as $s | $all | index($s)))')
+          echo "snippets=${picked:-[]}" >> "$GITHUB_OUTPUT"
+
+  self-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v8.1.0
+      - run: uv tool run --from 'ruff>=0.16' ruff check tools
+      - run: uv tool run --from 'ruff>=0.16' ruff format --check tools
+      - run: >-
+          uv run --no-project --isolated --python 3.12
+          --with 'mypy>=2.3' --with packaging --with pyyaml --with types-pyyaml
+          mypy --config-file pyproject.toml tools/verify.py
+
+  verify:
+    needs: discover
+    if: needs.discover.outputs.snippets != '[]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        snippet: ${{ fromJSON(needs.discover.outputs.snippets) }}
+        # highest: does it still work with today's releases?
+        # lowest-direct: do the declared lower bounds actually work?
+        resolution: [highest, lowest-direct]
+    name: ${{ matrix.snippet }} (${{ matrix.resolution }})
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v8.1.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: "snippets/${{ matrix.snippet }}/*.py"
+      - name: Verify
+        env:
+          UV_RESOLUTION: ${{ matrix.resolution }}
+          SNIPPET: ${{ matrix.snippet }}
+          RESOLUTION: ${{ matrix.resolution }}
+        run: uv run tools/verify.py "$SNIPPET" --json-out "status/$SNIPPET-$RESOLUTION.json"
+      - if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: status-${{ matrix.snippet }}-${{ matrix.resolution }}
+          path: status/
+          retention-days: 30
+
+  report:
+    # Only the full scheduled run produces the canonical status file and files issues.
+    needs: verify
+    if: always() && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v8.1.0
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: status-*
+          path: status
+          merge-multiple: true
+      - name: Merge status
+        run: |
+          uv run --no-project --python 3.12 python - <<'PY'
+          import json, pathlib
+          merged: dict[str, dict] = {}
+          for f in sorted(pathlib.Path("status").glob("*.json")):
+              report = json.loads(f.read_text())
+              for r in report["results"]:
+                  entry = merged.setdefault(r["snippet"], {"meta": r["meta"], "runs": {}})
+                  entry["runs"][report["resolution"]] = {
+                      "ok": r["ok"], "verified": report["generated"], "python": report["python"],
+                      "uv": report["uv"], "resolved": r["resolved"],
+                      "failed_steps": [s["name"] for s in r["steps"] if not s["ok"]],
+                  }
+          pathlib.Path("status.json").write_text(json.dumps(merged, indent=2, sort_keys=True) + "\n")
+          PY
+      - uses: actions/upload-artifact@v7
+        with:
+          name: status
+          path: status.json
+          retention-days: 90
+      - name: Open or update rot issue
+        if: needs.verify.result == 'failure'
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const fs = require("fs");
+            const status = JSON.parse(fs.readFileSync("status.json", "utf8"));
+            const broken = Object.entries(status).flatMap(([name, s]) =>
+              Object.entries(s.runs).filter(([, r]) => !r.ok)
+                .map(([res, r]) => `- \`${name}\` (${res}): ${r.failed_steps.join(", ")}`));
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const body = `Scheduled verification failed.\n\n${broken.join("\n")}\n\n[Run log](${runUrl})`;
+            const label = "snippet-rot";
+            const { data: open } = await github.rest.issues.listForRepo({
+              ...context.repo, state: "open", labels: label, per_page: 1,
+            });
+            if (open.length) {
+              await github.rest.issues.createComment({ ...context.repo, issue_number: open[0].number, body });
+            } else {
+              await github.rest.issues.create({ ...context.repo, title: "Snippets failing verification", body, labels: [label] });
+            }
