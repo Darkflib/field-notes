@@ -17,7 +17,8 @@ Usage:
     uv run tools/verify.py --json-out out.json  # also write a machine-readable report
     uv run tools/verify.py --merge status/      # merge per-run reports into status.json
 
-Set UV_RESOLUTION=lowest-direct to check that declared lower bounds actually work.
+Pass --resolution lowest-direct to check that declared lower bounds actually work. It applies
+only to the snippet's dependencies, never to the verifier's own or the tooling's.
 """
 
 from __future__ import annotations
@@ -50,7 +51,7 @@ REQUIRED_FRONTMATTER = {"title": str, "summary": str, "tags": list}
 REQUIRED_SECTIONS = ("Problem", "Why this approach", "Gotchas", "When not to use it")
 DEFAULT_TIMEOUT = 60
 
-# Verification tooling. These are deliberately resolved at *highest* whatever UV_RESOLUTION
+# Verification tooling. These are deliberately resolved at *highest* whatever --resolution
 # says: lowest-direct is for the snippet's dependencies, not for ruff (0.0.13, anyone?).
 RUFF = "ruff>=0.16"
 MYPY = "mypy>=2.3"
@@ -204,7 +205,7 @@ def step(
     return ok
 
 
-def verify(snippet: Path, uv: str) -> Result:
+def verify(snippet: Path, uv: str, resolution: str) -> Result:
     """Run every check against one snippet. Later steps are skipped once structure fails."""
     result = Result(snippet.name)
     log.info("%s", snippet.name)
@@ -226,6 +227,8 @@ def verify(snippet: Path, uv: str) -> Result:
 
     # Environment for tooling: identical except the resolution strategy is left at default.
     tool_env = {k: v for k, v in os.environ.items() if k != "UV_RESOLUTION"}
+    # Only the snippet's own dependency resolution (export and run) sees the strategy.
+    snippet_env = {**tool_env, "UV_RESOLUTION": resolution}
     ruff = [uv, "tool", "run", "--from", RUFF, "ruff"]
 
     # Lint and format across the whole snippet directory (tests included).
@@ -235,12 +238,12 @@ def verify(snippet: Path, uv: str) -> Result:
     step(result, "format", run([*ruff, "format", "--check", "."], snippet, TOOL_TIMEOUT, tool_env), started=t)
 
     with tempfile.TemporaryDirectory(prefix=f"verify-{snippet.name}-") as tmp:
-        # Resolve the script's dependencies once. This honours UV_RESOLUTION, so the same
+        # Resolve the script's dependencies once, at the chosen resolution, so the same
         # set is used for type checks and tests, and it records exactly what was verified.
         reqs = Path(tmp) / "requirements.txt"
         t = time.monotonic()
         export = [uv, "export", "--script", script.name, "--no-hashes", "--no-header", "-o", str(reqs)]
-        proc = run(export, snippet, TOOL_TIMEOUT)
+        proc = run(export, snippet, TOOL_TIMEOUT, snippet_env)
         if not step(result, "resolve", proc, started=t):
             return result
         for line in reqs.read_text(encoding="utf-8").splitlines():
@@ -259,7 +262,7 @@ def verify(snippet: Path, uv: str) -> Result:
         step(result, "mypy", run(type_cmd, snippet, TOOL_TIMEOUT, tool_env), started=t)
 
         # The actual demo. SNIPPET_CI lets a script shorten sleeps or skip interactive bits.
-        env = {**os.environ, "SNIPPET_CI": "1", "PYTHONUNBUFFERED": "1"}
+        env = {**snippet_env, "SNIPPET_CI": "1", "PYTHONUNBUFFERED": "1"}
         t = time.monotonic()
         step(result, "run", run([uv, "run", "--script", script.name], snippet, int(meta["timeout"]), env), started=t)
 
@@ -299,6 +302,12 @@ def main() -> int:
     parser.add_argument("--list-json", action="store_true", help="print snippet names as a JSON array and exit")
     parser.add_argument("--json-out", type=Path, help="write a JSON report here")
     parser.add_argument("--merge", type=Path, metavar="DIR", help="merge DIR/*.json reports into status.json and exit")
+    parser.add_argument(
+        "--resolution",
+        choices=["highest", "lowest-direct"],
+        default="highest",
+        help="dependency resolution for the snippet (lowest-direct checks the lower bounds)",
+    )
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO, format="%(message)s")
@@ -320,13 +329,13 @@ def main() -> int:
         return 2
 
     uv_version = run([uv, "--version"], REPO_ROOT, 30).stdout.strip()
-    resolution = os.environ.get("UV_RESOLUTION", "highest")
+    resolution = args.resolution
     log.info("%s, resolution=%s, %d snippet(s)\n", uv_version, resolution, len(snippets))
 
     results: list[Result] = []
     for snippet in snippets:
         try:
-            results.append(verify(snippet, uv))
+            results.append(verify(snippet, uv, resolution))
         except Exception:  # A verifier bug shouldn't hide results for other snippets.
             log.exception("verifier crashed on %s", snippet.name)
             results.append(

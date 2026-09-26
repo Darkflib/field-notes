@@ -92,10 +92,9 @@ jobs:
           cache-dependency-glob: "snippets/${{ matrix.snippet }}/*.py"
       - name: Verify
         env:
-          UV_RESOLUTION: ${{ matrix.resolution }}
           SNIPPET: ${{ matrix.snippet }}
           RESOLUTION: ${{ matrix.resolution }}
-        run: uv run tools/verify.py "$SNIPPET" --json-out "status/$SNIPPET-$RESOLUTION.json"
+        run: uv run tools/verify.py "$SNIPPET" --resolution "$RESOLUTION" --json-out "status/$SNIPPET-$RESOLUTION.json"
       - if: always()
         uses: actions/upload-artifact@v7
         with:

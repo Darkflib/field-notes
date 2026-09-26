@@ -59,6 +59,10 @@ CI runs every snippet twice:
 - `lowest-direct` checks that the lower bounds you've declared are true. Without it,
   `httpx>=0.27` is just a claim.
 
+Locally: `uv run tools/verify.py --resolution lowest-direct my-thing`. The strategy is a flag
+rather than `UV_RESOLUTION` in the environment on purpose: set in the environment it would
+also apply to the verifier's own dependencies and install versions that don't build any more.
+
 Scripts are deliberately not locked. A lock would make the rot check meaningless. Use
 `uv lock --script` locally if you want reproducibility while writing one.
 
