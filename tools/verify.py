@@ -15,6 +15,7 @@ Usage:
     uv run tools/verify.py retry-with-tenacity  # verify named snippets
     uv run tools/verify.py --list-json          # emit snippet names as JSON (for CI matrix)
     uv run tools/verify.py --json-out out.json  # also write a machine-readable report
+    uv run tools/verify.py --merge status/      # merge per-run reports into status.json
 
 Set UV_RESOLUTION=lowest-direct to check that declared lower bounds actually work.
 """
@@ -270,14 +271,43 @@ def verify(snippet: Path, uv: str) -> Result:
     return result
 
 
+def merge_reports(report_dir: Path) -> dict[str, Any]:
+    """Merge per-run --json-out reports into the site-facing status, keyed by snippet.
+
+    Each snippet gets its frontmatter subset plus one entry per resolution, so the site
+    can say "verified <date> with tenacity 9.1.4" and show the proven lower bounds.
+    """
+    merged: dict[str, Any] = {}
+    for f in sorted(report_dir.glob("*.json")):
+        report = json.loads(f.read_text(encoding="utf-8"))
+        for r in report["results"]:
+            entry = merged.setdefault(r["snippet"], {"meta": r["meta"], "runs": {}})
+            entry["runs"][report["resolution"]] = {
+                "ok": r["ok"],
+                "verified": report["generated"],
+                "python": report["python"],
+                "uv": report["uv"],
+                "resolved": r["resolved"],
+                "failed_steps": [s["name"] for s in r["steps"] if not s["ok"]],
+            }
+    return merged
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("snippets", nargs="*", help="snippet names (default: all)")
     parser.add_argument("--list-json", action="store_true", help="print snippet names as a JSON array and exit")
     parser.add_argument("--json-out", type=Path, help="write a JSON report here")
+    parser.add_argument("--merge", type=Path, metavar="DIR", help="merge DIR/*.json reports into status.json and exit")
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO, format="%(message)s")
+
+    if args.merge:
+        out = args.json_out or REPO_ROOT / "status.json"
+        out.write_text(json.dumps(merge_reports(args.merge), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        log.info("wrote %s", out)
+        return 0
 
     snippets = discover(args.snippets)
     if args.list_json:
