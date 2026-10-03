@@ -68,8 +68,17 @@ Scripts are deliberately not locked. A lock would make the rot check meaningless
 
 ## Status for the site
 
-The weekly scheduled run uploads a `status` artifact containing `status.json`, keyed by
-snippet. For each snippet it records pass/fail per resolution, a timestamp, the Python and
-uv versions, and the exact versions resolved. The site build can pull the latest one (via
-`gh run download` or the Actions API) to render "verified 2026-09-28 with tenacity 9.1.4".
-Failures open or update a single `snippet-rot` issue.
+Every full run (the weekly schedule, or a manual one) merges its results into `status.json`,
+keyed by snippet. For each snippet it records pass/fail per resolution, a timestamp, the
+Python and uv versions, and the exact versions resolved, which is what lets the site render
+"verified 2026-09-28 with tenacity 9.1.4".
+
+The run publishes it to the `status` branch, next to `commit.txt` naming the commit that was
+verified. The site's content bundle reads both from there, so it needs no credentials:
+
+```sh
+curl -fsSLO https://raw.githubusercontent.com/Darkflib/field-notes/status/status.json
+```
+
+The same file is also uploaded as the run's `status` artifact. Failures open or update a
+single `snippet-rot` issue.

@@ -148,3 +148,33 @@ jobs:
             } else {
               await github.rest.issues.create({ ...context.repo, title: "Snippets failing verification", body, labels: [label] });
             }
+
+  publish:
+    # Publishes status.json to the `status` branch so the site's content bundle can read it
+    # without credentials. commit.txt names the commit that was verified, so the site imports
+    # exactly the snippets the status describes. The branch is a single generated commit.
+    needs: report
+    if: always() && needs.report.result == 'success' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: status
+          path: out
+      - name: Push to the status branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        working-directory: out
+        run: |
+          set -euo pipefail
+          echo "$SHA" > commit.txt
+          git init -q -b status
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add status.json commit.txt
+          git commit -qm "Status for $SHA"
+          git push -f "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" status
