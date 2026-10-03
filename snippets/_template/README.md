@@ -2,6 +2,7 @@
 title: One-line title of the thing being demonstrated
 summary: A sentence that works as the index-page blurb and the meta description.
 tags: [python]
+published: 2026-01-01     # the day it goes on the site
 libraries: []          # headline libraries, for the site's per-library index
 entrypoint: main.py    # optional, defaults to main.py
 timeout: 60            # seconds; the run is killed after this

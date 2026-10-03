@@ -38,7 +38,7 @@ uv run tools/verify.py my-thing
 
 The verifier enforces all of this, so it can't drift.
 
-**README.md** starts with frontmatter (`title`, `summary`, and `tags` are required;
+**README.md** starts with frontmatter (`title`, `summary`, `tags`, and `published` are required;
 `libraries`, `entrypoint`, `timeout`, and `network` are optional) and contains these sections:
 Problem, Why this approach, Gotchas, When not to use it. It can have other sections too.
 

@@ -2,6 +2,7 @@
 title: Retrying transient HTTP failures with tenacity
 summary: Retry 429s, 5xx gateway errors, and dropped connections with jittered backoff, and fail fast on everything else.
 tags: [python, http, resilience]
+published: 2026-09-25
 libraries: [tenacity, httpx]
 timeout: 30
 network: false

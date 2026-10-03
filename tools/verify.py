@@ -35,7 +35,7 @@ import sys
 import tempfile
 import time
 import tomllib
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -48,6 +48,9 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 SNIPPETS_DIR = REPO_ROOT / "snippets"
 
 REQUIRED_FRONTMATTER = {"title": str, "summary": str, "tags": list}
+# The site shows this date and builds reproducibly from it, so it lives here rather than
+# being stamped at import time. YAML parses an unquoted 2026-09-25 as a date.
+DATE_FRONTMATTER = ("published",)
 REQUIRED_SECTIONS = ("Problem", "Why this approach", "Gotchas", "When not to use it")
 DEFAULT_TIMEOUT = 60
 
@@ -118,6 +121,9 @@ def parse_frontmatter(readme: Path) -> tuple[dict[str, Any], str]:
     for key, kind in REQUIRED_FRONTMATTER.items():
         if not isinstance(meta.get(key), kind) or not meta[key]:
             raise SnippetError(f"frontmatter '{key}' must be a non-empty {kind.__name__}")
+    for key in DATE_FRONTMATTER:
+        if type(meta.get(key)) is not date:
+            raise SnippetError(f"frontmatter '{key}' must be a date (YYYY-MM-DD, unquoted)")
     timeout = meta.setdefault("timeout", DEFAULT_TIMEOUT)
     if not isinstance(timeout, int) or not 1 <= timeout <= 600:
         raise SnippetError("frontmatter 'timeout' must be an integer between 1 and 600")
