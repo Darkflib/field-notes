@@ -38,6 +38,9 @@ uv run tools/verify.py my-thing
 
 The verifier enforces all of this, so it can't drift.
 
+**The directory name** is the snippet's URL on the site, so it is lowercase letters and digits
+separated by single hyphens (`retry-with-tenacity`).
+
 **README.md** starts with frontmatter (`title`, `summary`, `tags`, and `published` are required;
 `libraries`, `entrypoint`, `timeout`, and `network` are optional) and contains these sections:
 Problem, Why this approach, Gotchas, When not to use it. It can have other sections too.
