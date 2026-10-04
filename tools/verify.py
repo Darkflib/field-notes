@@ -64,6 +64,9 @@ TOOL_TIMEOUT = 300  # ceiling for dependency resolution, lint, type-check, tests
 # Reference regex from the PEP 723 specification.
 PEP723_RE = re.compile(r"(?m)^# /// (?P<type>[a-zA-Z0-9-]+)$\s(?P<content>(^#(| .*)$\s)+)^# ///$")
 FRONTMATTER_RE = re.compile(r"\A---\n(?P<body>.*?)\n---\n", re.DOTALL)
+# The directory name is the page's URL on the site (/field-notes/<name>), and the site's
+# importer refuses anything else. Checked here so it fails in this repo, not in the site's build.
+SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 PINNED_RE = re.compile(r"^([A-Za-z0-9._-]+)==([^\s;]+)")
 
 
@@ -219,6 +222,10 @@ def verify(snippet: Path, uv: str, resolution: str) -> Result:
     # Structure.
     t = time.monotonic()
     try:
+        if not SLUG_RE.match(snippet.name):
+            raise SnippetError(
+                f"directory name {snippet.name!r} must be lowercase letters and digits separated by single hyphens"
+            )
         meta, body = parse_frontmatter(snippet / "README.md")
         check_sections(body)
         script = snippet / meta["entrypoint"]
