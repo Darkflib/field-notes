@@ -222,7 +222,7 @@ def verify(snippet: Path, uv: str, resolution: str) -> Result:
     # Structure.
     t = time.monotonic()
     try:
-        if not SLUG_RE.match(snippet.name):
+        if not SLUG_RE.fullmatch(snippet.name):
             raise SnippetError(
                 f"directory name {snippet.name!r} must be lowercase letters and digits separated by single hyphens"
             )
