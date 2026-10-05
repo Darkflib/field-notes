@@ -83,5 +83,13 @@ verified. The site's content bundle reads both from there, so it needs no creden
 curl -fsSLO https://raw.githubusercontent.com/Darkflib/field-notes/status/status.json
 ```
 
+After publishing, the run tells the site that the status moved (the `notify-site` job), so
+the site rebuilds its content bundle within a few minutes instead of at its next daily run.
+A push to `main` does not notify it: the site imports the commit the status describes, so
+nothing changes there until a full run has verified that commit.
+
+Separately, the `site-import` job runs the site's own importer over every snippet on each
+push and pull request, to check that each README projects into a page the site will accept.
+
 The same file is also uploaded as the run's `status` artifact. Failures open or update a
 single `snippet-rot` issue.

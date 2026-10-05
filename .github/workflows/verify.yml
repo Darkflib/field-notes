@@ -178,3 +178,81 @@ jobs:
           git add status.json commit.txt
           git commit -qm "Status for $SHA"
           git push -f "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" status
+
+  notify-site:
+    # Tells mikepreston.org that the published status moved, so it rebuilds its content bundle
+    # now instead of at its next daily run. It follows `publish`, not a push: the site imports
+    # the commit the status describes, so a push to main changes nothing there until a full
+    # run has verified it and published the result.
+    #
+    # Needs SITE_DISPATCH_TOKEN: a fine-grained token with Contents: read and write on
+    # Darkflib/mikepreston.org (what GitHub requires to send a repository_dispatch). Without
+    # the secret this passes with a warning; with an expired one it fails, so it gets renewed.
+    needs: publish
+    if: needs.publish.result == 'success'
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Send content-changed
+        env:
+          GH_TOKEN: ${{ secrets.SITE_DISPATCH_TOKEN }}
+          SOURCE_REPO: ${{ github.repository }}
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::warning::SITE_DISPATCH_TOKEN is not set, so the site was not notified. It will rebuild on its daily run."
+            exit 0
+          fi
+          gh api -X POST repos/Darkflib/mikepreston.org/dispatches \
+            -f event_type=content-changed \
+            -f "client_payload[repo]=$SOURCE_REPO" \
+            -f "client_payload[sha]=$SOURCE_SHA"
+          echo "Asked Darkflib/mikepreston.org to rebuild its content bundle for $SOURCE_SHA."
+
+  site-import:
+    # Runs the site's own importer and linter over every snippet, into a scratch directory:
+    # does each README project into a page the site will accept? tools/verify.py checks that
+    # a snippet runs; this checks the other half, with the code that will actually publish it.
+    # Every snippet is checked whether or not it has been verified yet, since a pull request
+    # is where a new one first appears.
+    #
+    # Needs SITE_READ_TOKEN: a fine-grained token with Contents: read on
+    # Darkflib/mikepreston.org (private). Without it (always the case for a pull request from
+    # a fork) the job passes with a warning. This repo is public, so this job's log is too:
+    # it prints snippet names and lint findings, nothing from the site repo.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Look for the site token
+        id: token
+        env:
+          SITE_READ_TOKEN: ${{ secrets.SITE_READ_TOKEN }}
+        run: |
+          if [ -n "$SITE_READ_TOKEN" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::SITE_READ_TOKEN is not set, so the site import check was skipped."
+          fi
+      - name: Check out the site's importer
+        if: steps.token.outputs.present == 'true'
+        uses: actions/checkout@v6
+        with:
+          repository: Darkflib/mikepreston.org
+          token: ${{ secrets.SITE_READ_TOKEN }}
+          path: .site
+          sparse-checkout: |
+            api
+            public
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v8.1.0
+        if: steps.token.outputs.present == 'true'
+      - name: Import and lint as the site would
+        if: steps.token.outputs.present == 'true'
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/site-content"
+          uv run --project .site/api --frozen mp-content import \
+            --field-notes-from . --include-unverified --content-dir "$out" --yes
+          uv run --project .site/api --frozen mp-content check --content-dir "$out"
