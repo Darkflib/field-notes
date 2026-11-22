@@ -25,7 +25,7 @@ jobs:
     outputs:
       snippets: ${{ steps.pick.outputs.snippets }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -58,7 +58,7 @@ jobs:
   self-check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - uses: astral-sh/setup-uv@v8.1.0
@@ -83,7 +83,7 @@ jobs:
         resolution: [highest, lowest-direct]
     name: ${{ matrix.snippet }} (${{ matrix.resolution }})
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - uses: astral-sh/setup-uv@v8.1.0
@@ -111,7 +111,7 @@ jobs:
       contents: read
       issues: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - uses: astral-sh/setup-uv@v8.1.0
@@ -222,7 +222,7 @@ jobs:
     # it prints snippet names and lint findings, nothing from the site repo.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - name: Look for the site token
@@ -237,7 +237,7 @@ jobs:
           fi
       - name: Check out the site's importer
         if: steps.token.outputs.present == 'true'
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: Darkflib/mikepreston.org
           token: ${{ secrets.SITE_READ_TOKEN }}
